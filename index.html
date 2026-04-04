@@ -30,12 +30,30 @@
       position: absolute;
       left: 50%;
       top: 50%;
+      z-index: 1;
       transform: translate(-50%, calc(-100% - 0.5em)) rotate(var(--hypo-angle, 0deg));
       transform-origin: center center;
       font-family: system-ui, sans-serif;
       font-weight: 600;
       white-space: nowrap;
       pointer-events: none;
+    }
+
+    .triangle-scale-wrap {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      will-change: transform;
+    }
+
+    .triangle-scale-wrap--origin-top {
+      top: 0;
+      transform-origin: top center;
+    }
+
+    .triangle-scale-wrap--origin-bottom {
+      bottom: 0;
+      transform-origin: bottom center;
     }
 
     .triangles-section {
@@ -280,7 +298,27 @@
       return SCRIPT[chronologicalIndex % SCRIPT.length];
     };
 
-    const renderStack = (stage, heights) => {
+    /**
+     * Map previous stack height to layer index i when stack length may have changed.
+     * Top is index 0; when a new triangle is prepended, former layers shift down by one.
+     */
+    const prevHeightForLayer = (heights, prevHeights, i) => {
+      const hv = Math.max(0, heights[i]);
+      if (!prevHeights || prevHeights.length === 0) return hv;
+      const n = heights.length;
+      const nPrev = prevHeights.length;
+      if (nPrev === n) return Math.max(0, prevHeights[i]);
+      if (n === nPrev + 1) {
+        if (i === 0) return 0;
+        return Math.max(0, prevHeights[i - 1]);
+      }
+      if (n === nPrev - 1 && i < n) {
+        return Math.max(0, prevHeights[i + 1]);
+      }
+      return hv;
+    };
+
+    const renderStack = (stage, heights, prevHeights) => {
       const maxTopVhForStack = maxTopVh(heights);
       const layers = heights
         .map((h, i) => {
@@ -303,12 +341,20 @@
               break;
           }
           const hv = Math.max(0, h);
+          const prevH = prevHeightForLayer(heights, prevHeights, i);
+          const growing = hv >= prevH - 1e-9;
+          const originClass = growing
+            ? 'triangle-scale-wrap--origin-top'
+            : 'triangle-scale-wrap--origin-bottom';
+          const maxVh = maxTopVhForStack;
+          const scale =
+            maxVh > 1e-9 && hv > 1e-9 ? Math.min(1, hv / maxVh) : 0;
           const inner =
             hv < 1e-6
               ? ''
               : getTriangle({
                 width: '100vw',
-                height: `${hv}vh`,
+                height: `${maxVh}vh`,
                 rightAngleLocation,
                 color: triangleColor,
               });
@@ -340,11 +386,16 @@
           } else {
             labelOpacity = hv > MIN_VH + 1e-9 ? 1 : 0;
           }
+          /** Label is a sibling of the scaled wrap so it’s positioned in the hv-tall layer (hypotenuse tracks the visible triangle) and isn’t affected by scaleY (avoids skew from rotate × inverse scale). */
           const labelSpan =
             hv < 1e-6 || !line
               ? ''
               : `<span class="hypotenuse-label" style="color: ${textColor}; --hypo-angle: ${angleDeg}deg; opacity: ${labelOpacity}" aria-hidden="true">${escapeHtml(line)}</span>`;
-          return `<div class="stack-layer" style="height:${hv}vh; background-color: ${backgroundColor}">${inner}${labelSpan}</div>`;
+          const scaleBlock =
+            hv < 1e-6
+              ? ''
+              : `<div class="triangle-scale-wrap ${originClass}" style="height:${maxVh}vh; transform: scaleY(${scale})">${inner}</div>`;
+          return `<div class="stack-layer" style="height:${hv}vh; background-color: ${backgroundColor}">${scaleBlock}${labelSpan}</div>`;
         })
         .join('');
       stage.innerHTML = `<div class="stack">${layers}</div>`;
@@ -358,7 +409,8 @@
 
       gsap.registerPlugin(ScrollTrigger);
 
-      renderStack(stage, keyframes[0].heights);
+      let prevHeights = null;
+      renderStack(stage, keyframes[0].heights, prevHeights);
 
       ScrollTrigger.create({
         trigger: section,
@@ -369,7 +421,8 @@
         anticipatePin: 1,
         onUpdate: (self) => {
           const h = heightsAtProgress(keyframes, self.progress);
-          renderStack(stage, h);
+          renderStack(stage, h, prevHeights);
+          prevHeights = h.slice();
         },
       });
 
