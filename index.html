@@ -8,6 +8,21 @@
       margin: 0;
       overflow-x: hidden;
     }
+    .stack {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      width: 100%;
+      height: 100vh;
+      flex-shrink: 0;
+    }
+    .stack-layer {
+      flex-shrink: 0;
+      display: flex;
+      justify-content: flex-end;
+      width: 100%;
+      overflow: hidden;
+    }
     .controls {
       display: flex;
       flex-direction: row;
@@ -57,34 +72,135 @@
       }
     }
 
+    const TRIANGLE_TARGET = 100;
+    const MIN_VH = 1;
+    /** vh grown per millisecond (same scale as before: ~100vh per 60s for the first triangle) */
+    const VH_PER_MS = 100 / 100;
+
+    /**
+     * Heights in vh, top-first: index 0 is the newest / growing triangle.
+     * Sum is always 100. Each layer below the top may shrink down to MIN_VH, so the
+     * top can grow at most 100 - (n-1)*MIN_VH when n >= 2.
+     */
+    const maxTopVh = (heights) => {
+      const n = heights.length;
+      if (n <= 1) return 100;
+      return 100 - (n - 1) * MIN_VH;
+    };
+
+    /**
+     * Increase the top triangle by dh vh; remove height from layers below, bottom-first.
+     */
+    const growTop = (heights, dh) => {
+      if (heights.length <= 1 || dh <= 0) return heights;
+      const out = heights.slice();
+      let remaining = dh;
+      out[0] += dh;
+      for (let i = out.length - 1; i >= 1 && remaining > 1e-9; i--) {
+        const take = Math.min(remaining, Math.max(0, out[i] - MIN_VH));
+        out[i] -= take;
+        remaining -= take;
+      }
+      if (remaining > 1e-9) {
+        out[0] -= remaining;
+      }
+      return out;
+    };
+
+    const maybeAddTriangle = (heights) => {
+      if (heights.length >= TRIANGLE_TARGET) return heights;
+      const cap = maxTopVh(heights);
+      if (heights[0] < cap - 1e-6) return heights;
+      return [0, ...heights];
+    };
+
+    const renderStack = (stage, heights) => {
+      const rightAngleLocation = 'top-right';
+      const color = 'red';
+      const layers = heights
+        .map((h) => {
+          const hv = Math.max(0, h);
+          const inner =
+            hv < 1e-6
+              ? ''
+              : getTriangle({
+                  width: '100vw',
+                  height: `${hv}vh`,
+                  rightAngleLocation,
+                  color,
+                });
+          return `<div class="stack-layer" style="height:${hv}vh">${inner}</div>`;
+        })
+        .join('');
+      stage.innerHTML = `<div class="stack">${layers}</div>`;
+    };
+
     const main = () => {
-      const main = document.getElementById('main');
       const stage = document.getElementById('stage');
       const startButton = document.getElementById('start');
       const stopButton = document.getElementById('stop');
-      let LOOPING = true;
-      let START_TIME;
-      const SPEED = window.innerHeight / 60000; // How many pixels to move per second
+      let LOOPING = false;
+      let rafId = 0;
+      let lastTs = 0;
+      /** @type {number[]} */
+      let heights = [0];
+
+      const tick = (ts) => {
+        if (!LOOPING) return;
+        if (lastTs === 0) lastTs = ts;
+        const dt = ts - lastTs;
+        lastTs = ts;
+
+        if (heights.length === 1) {
+          heights = [Math.min(100, heights[0] + VH_PER_MS * dt)];
+          if (heights[0] >= 100 - 1e-6) {
+            heights = maybeAddTriangle(heights);
+            lastTs = ts;
+          }
+        } else {
+          let h = heights;
+          const cap = maxTopVh(h);
+          const room = cap - h[0];
+          if (room > 1e-9) {
+            const step = Math.min(room, VH_PER_MS * dt);
+            h = growTop(h, step);
+          }
+          heights = h;
+          if (h[0] >= maxTopVh(h) - 1e-6 && h.length < TRIANGLE_TARGET) {
+            heights = maybeAddTriangle(h);
+            lastTs = ts;
+          }
+        }
+
+        renderStack(stage, heights);
+
+        const cap = maxTopVh(heights);
+        const done =
+          heights.length >= TRIANGLE_TARGET &&
+          heights[0] >= cap - 1e-3 &&
+          heights.slice(1).every((x) => Math.abs(x - MIN_VH) < 1e-2);
+
+        if (!done && LOOPING) {
+          rafId = requestAnimationFrame(tick);
+        } else {
+          LOOPING = false;
+        }
+      };
+
       const start = () => {
+        if (LOOPING) return;
         LOOPING = true;
-        START_TIME = Date.now();
-        loop();
-      }
+        lastTs = 0;
+        heights = [0];
+        cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(tick);
+      };
+
       const stop = () => {
         LOOPING = false;
-      }
-      const loop = ((stage) => {
-        const time = Date.now() - START_TIME;
-        const n = Math.floor(time * SPEED);
-        const height = `${n % 100}vh`;
-        const width = `100vw`;
-        const rightAngleLocation = 'top-right';
-        const color = 'red';
-        stage.innerHTML = getTriangle({ width, height, rightAngleLocation, color });
-        if (LOOPING) {
-          requestAnimationFrame(loop);
-        }
-      }).bind(this, stage);
+        cancelAnimationFrame(rafId);
+      };
+
       startButton.addEventListener('click', start);
       stopButton.addEventListener('click', stop);
     }
