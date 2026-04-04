@@ -196,7 +196,6 @@
     ** CONSTANTS **
     ***************
     */
-    const VALID_RIGHT_ANGLE_LOCATIONS = ['top-right', 'top-left', 'bottom-right', 'bottom-left'];
     const TRIANGLE_TARGET = 100 / MIN_VH;
 
     /*
@@ -204,25 +203,6 @@
     ** FUNCTIONS **
     ***************
     */
-
-    const getTriangle = ({ width, height, rightAngleLocation = 'top-right', color = 'black' }) => {
-      if (!VALID_RIGHT_ANGLE_LOCATIONS.includes(rightAngleLocation)) {
-        throw new Error(`Invalid right angle location: ${rightAngleLocation}`);
-      }
-
-      switch (rightAngleLocation) {
-        case 'top-right':
-          return `<div data-right-angle-location="top-right" style="border-top: 0 solid transparent; border-bottom: ${height} solid transparent; border-right: ${width} solid ${color};"></div>`;
-        case 'top-left':
-          return `<div data-right-angle-location="top-left" style="border-top: 0 solid transparent; border-bottom: ${height} solid transparent; border-left: ${width} solid ${color};"></div>`;
-        case 'bottom-right':
-          return `<div data-right-angle-location="bottom-right" style="border-top: ${height} solid transparent; border-bottom: 0 solid transparent; border-right: ${width} solid ${color};"></div>`;
-        case 'bottom-left':
-          return `<div data-right-angle-location="bottom-left" style="border-top: ${height} solid transparent; border-bottom: 0 solid transparent; border-left: ${width} solid ${color};"></div>`;
-        default:
-          throw new Error(`Invalid right angle location: ${rightAngleLocation}`);
-      }
-    }
 
     /**
      * Heights in vh, top-first: index 0 is the newest / growing triangle.
@@ -342,13 +322,6 @@
     const colorSetIndexForTriangle = (chronologicalIndex) =>
       Math.floor(chronologicalIndex / COLOR_SET_TRIANGLE_CADENCE) % COLOR_COMBINATIONS.length;
 
-    const escapeHtml = (s) =>
-      String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-
     const rightAngleLocationForChronologicalIndex = (chronologicalIndex) => {
       switch (chronologicalIndex % 4) {
         case 0:
@@ -415,60 +388,140 @@
       return hv;
     };
 
-    const renderStack = (stage, heights, prevHeights) => {
+    /**
+     * Apply border-based triangle styles (same geometry as getTriangle HTML).
+     */
+    const setTriangleShapeEl = (el, { width, heightVh, rightAngleLocation, color }) => {
+      const h = `${heightVh}vh`;
+      const w = width;
+      el.dataset.rightAngleLocation = rightAngleLocation;
+      switch (rightAngleLocation) {
+        case 'top-right':
+          el.style.cssText = `border-top:0 solid transparent;border-bottom:${h} solid transparent;border-right:${w} solid ${color};border-left:none;`;
+          break;
+        case 'top-left':
+          el.style.cssText = `border-top:0 solid transparent;border-bottom:${h} solid transparent;border-left:${w} solid ${color};border-right:none;`;
+          break;
+        case 'bottom-right':
+          el.style.cssText = `border-top:${h} solid transparent;border-bottom:0 solid transparent;border-right:${w} solid ${color};border-left:none;`;
+          break;
+        case 'bottom-left':
+          el.style.cssText = `border-top:${h} solid transparent;border-bottom:0 solid transparent;border-left:${w} solid ${color};border-right:none;`;
+          break;
+        default:
+          throw new Error(`Invalid right angle location: ${rightAngleLocation}`);
+      }
+    };
+
+    /**
+     * Create one .stack-layer per possible triangle (TRIANGLE_TARGET); visibility and
+     * geometry are driven by updateStack instead of replacing innerHTML every frame.
+     */
+    const buildStackDom = (stage) => {
+      const stack = document.createElement('div');
+      stack.className = 'stack';
+      const layers = [];
+      for (let i = 0; i < TRIANGLE_TARGET; i++) {
+        const root = document.createElement('div');
+        root.className = 'stack-layer';
+        root.style.display = 'none';
+
+        const scaleWrap = document.createElement('div');
+        scaleWrap.className = 'triangle-scale-wrap';
+        scaleWrap.style.display = 'none';
+
+        const triangle = document.createElement('div');
+        scaleWrap.appendChild(triangle);
+
+        const label = document.createElement('span');
+        label.className = 'hypotenuse-label';
+        label.setAttribute('aria-hidden', 'true');
+        label.style.display = 'none';
+
+        root.appendChild(scaleWrap);
+        root.appendChild(label);
+        stack.appendChild(root);
+        layers.push({ root, scaleWrap, triangle, label });
+      }
+      stage.replaceChildren(stack);
+      return layers;
+    };
+
+    const updateStack = (layerEls, heights, prevHeights) => {
       const maxTopVhForStack = maxTopVh(heights);
-      const layers = heights
-        .map((h, i) => {
-          const chronologicalIndex = heights.length - 1 - i;
-          const { triangleColor, backgroundColor, textColor } =
-            COLOR_COMBINATIONS[colorSetIndexForTriangle(chronologicalIndex)];
-          const rightAngleLocation = rightAngleLocationForChronologicalIndex(chronologicalIndex);
-          const hv = Math.max(0, h);
-          const prevH = prevHeightForLayer(heights, prevHeights, i);
-          const growing = hv >= prevH - 1e-9;
-          const originClass = growing
-            ? 'triangle-scale-wrap--origin-top'
-            : 'triangle-scale-wrap--origin-bottom';
-          const maxVh = maxTopVhForStack;
-          const scale =
-            maxVh > 1e-9 && hv > 1e-9 ? Math.min(1, hv / maxVh) : 0;
-          const inner =
-            hv < 1e-6
-              ? ''
-              : getTriangle({
-                width: '100vw',
-                height: `${maxVh}vh`,
-                rightAngleLocation,
-                color: triangleColor,
-              });
-          const line = scriptLineForTriangle(chronologicalIndex);
-          const iw = window.innerWidth;
-          const ih = window.innerHeight;
-          const layerW = iw;
-          const layerH = (hv / 100) * ih;
-          const angleDeg = hypotenuseLabelAngleDeg(rightAngleLocation, layerW, layerH);
-          const heightSpan = maxTopVhForStack - MIN_VH;
-          let labelOpacity = 1;
-          if (heightSpan > 1e-9) {
-            const t = (hv - MIN_VH) / heightSpan;
-            labelOpacity =
-              t <= 0 ? 0 : t < LABEL_FADE_ZONE_FRAC ? t / LABEL_FADE_ZONE_FRAC : 1;
-          } else {
-            labelOpacity = hv > MIN_VH + 1e-9 ? 1 : 0;
-          }
-          /** Label is a sibling of the scaled wrap so it’s positioned in the hv-tall layer (hypotenuse tracks the visible triangle) and isn’t affected by scaleY (avoids skew from rotate × inverse scale). */
-          const labelSpan =
-            hv < 1e-6 || !line
-              ? ''
-              : `<span class="hypotenuse-label" style="color: ${textColor}; --hypo-angle: ${angleDeg}deg; opacity: ${labelOpacity}" aria-hidden="true">${escapeHtml(line)}</span>`;
-          const scaleBlock =
-            hv < 1e-6
-              ? ''
-              : `<div class="triangle-scale-wrap ${originClass}" style="height:${maxVh}vh; transform: scaleY(${scale})">${inner}</div>`;
-          return `<div class="stack-layer" style="height:${hv}vh; background-color: ${backgroundColor}">${scaleBlock}${labelSpan}</div>`;
-        })
-        .join('');
-      stage.innerHTML = `<div class="stack">${layers}</div>`;
+      const n = heights.length;
+      const iw = window.innerWidth;
+      const ih = window.innerHeight;
+
+      for (let i = 0; i < TRIANGLE_TARGET; i++) {
+        const L = layerEls[i];
+        if (i >= n) {
+          L.root.style.display = 'none';
+          continue;
+        }
+
+        L.root.style.display = '';
+
+        const h = heights[i];
+        const hv = Math.max(0, h);
+        const chronologicalIndex = n - 1 - i;
+        const { triangleColor, backgroundColor, textColor } =
+          COLOR_COMBINATIONS[colorSetIndexForTriangle(chronologicalIndex)];
+        const rightAngleLocation = rightAngleLocationForChronologicalIndex(chronologicalIndex);
+        const prevH = prevHeightForLayer(heights, prevHeights, i);
+        const growing = hv >= prevH - 1e-9;
+        const originClass = growing
+          ? 'triangle-scale-wrap--origin-top'
+          : 'triangle-scale-wrap--origin-bottom';
+        const maxVh = maxTopVhForStack;
+        const scale =
+          maxVh > 1e-9 && hv > 1e-9 ? Math.min(1, hv / maxVh) : 0;
+
+        L.root.style.height = `${hv}vh`;
+        L.root.style.backgroundColor = backgroundColor;
+
+        if (hv < 1e-6) {
+          L.scaleWrap.style.display = 'none';
+          L.label.style.display = 'none';
+          continue;
+        }
+
+        L.scaleWrap.style.display = '';
+        L.scaleWrap.className = `triangle-scale-wrap ${originClass}`;
+        L.scaleWrap.style.height = `${maxVh}vh`;
+        L.scaleWrap.style.transform = `scaleY(${scale})`;
+
+        setTriangleShapeEl(L.triangle, {
+          width: '100vw',
+          heightVh: maxVh,
+          rightAngleLocation,
+          color: triangleColor,
+        });
+
+        const line = scriptLineForTriangle(chronologicalIndex);
+        const layerW = iw;
+        const layerH = (hv / 100) * ih;
+        const angleDeg = hypotenuseLabelAngleDeg(rightAngleLocation, layerW, layerH);
+        const heightSpan = maxTopVhForStack - MIN_VH;
+        let labelOpacity = 1;
+        if (heightSpan > 1e-9) {
+          const t = (hv - MIN_VH) / heightSpan;
+          labelOpacity =
+            t <= 0 ? 0 : t < LABEL_FADE_ZONE_FRAC ? t / LABEL_FADE_ZONE_FRAC : 1;
+        } else {
+          labelOpacity = hv > MIN_VH + 1e-9 ? 1 : 0;
+        }
+
+        if (!line) {
+          L.label.style.display = 'none';
+        } else {
+          L.label.style.display = '';
+          L.label.textContent = line;
+          L.label.style.color = textColor;
+          L.label.style.setProperty('--hypo-angle', `${angleDeg}deg`);
+          L.label.style.opacity = String(labelOpacity);
+        }
+      }
     };
 
     const main = () => {
@@ -481,7 +534,8 @@
 
       let prevHeights = null;
       let lastProgress = 0;
-      renderStack(stage, keyframes[0].heights, prevHeights);
+      const layerEls = buildStackDom(stage);
+      updateStack(layerEls, keyframes[0].heights, prevHeights);
 
       const scrollTrigger = ScrollTrigger.create({
         trigger: section,
@@ -493,7 +547,7 @@
         onUpdate: (self) => {
           lastProgress = self.progress;
           const h = heightsAtProgress(keyframes, self.progress);
-          renderStack(stage, h, prevHeights);
+          updateStack(layerEls, h, prevHeights);
           prevHeights = h.slice();
         },
       });
@@ -545,7 +599,7 @@
         lastProgress = Math.max(0, Math.min(1, p));
         scrollToProgress(lastProgress);
         const h = heightsAtProgress(keyframes, lastProgress);
-        renderStack(stage, h, prevHeights);
+        updateStack(layerEls, h, prevHeights);
         prevHeights = h.slice();
       };
 
@@ -565,7 +619,7 @@
           lastProgress = Math.max(0, lastProgress - step);
         }
         const h = heightsAtProgress(keyframes, lastProgress);
-        renderStack(stage, h, prevHeights);
+        updateStack(layerEls, h, prevHeights);
         prevHeights = h.slice();
         const atEnd = holdForward ? lastProgress >= 1 - 1e-6 : lastProgress <= 1e-6;
         if (!atEnd) {
@@ -655,7 +709,7 @@
                 lastProgress = state.p;
                 scrollToProgress(lastProgress);
                 const h = heightsAtProgress(keyframes, lastProgress);
-                renderStack(stage, h, prevHeights);
+                updateStack(layerEls, h, prevHeights);
                 prevHeights = h.slice();
               },
               onComplete: () => {
@@ -707,7 +761,7 @@
           doubleTapTween = null;
         }
         const h = heightsAtProgress(keyframes, lastProgress);
-        renderStack(stage, h, prevHeights);
+        updateStack(layerEls, h, prevHeights);
         ScrollTrigger.refresh();
       });
 
