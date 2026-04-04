@@ -53,7 +53,7 @@
 
     
     /** Minimum height of a triangle in vh, as they shrink down to make room for others */
-    const MIN_VH = 5;
+    const MIN_VH = 0.5;
     /** vh grown per millisecond (same scale as before: ~100vh per 60s for the first triangle) */
     const VH_PER_MS = 100 / 100;
 
@@ -119,7 +119,8 @@
     };
 
     const renderStack = (stage, heights) => {
-      const color = 'red';
+      const color_a = 'tomato';
+      const color_b = 'skyblue';
       const layers = heights
         .map((h, i) => {
           const chronologicalIndex = heights.length - 1 - i;
@@ -148,9 +149,9 @@
                   width: '100vw',
                   height: `${hv}vh`,
                   rightAngleLocation,
-                  color,
+                  color: color_a,
                 });
-          return `<div class="stack-layer" style="height:${hv}vh">${inner}</div>`;
+          return `<div class="stack-layer" style="height:${hv}vh; background-color: ${color_b}">${inner}</div>`;
         })
         .join('');
       stage.innerHTML = `<div class="stack">${layers}</div>`;
