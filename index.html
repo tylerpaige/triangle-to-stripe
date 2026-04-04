@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+
+<head>
+  <style>
+    html,
+    body {
+      margin: 0;
+      overflow-x: hidden;
+    }
+    .controls {
+      display: flex;
+      flex-direction: row;
+      gap: 2px;
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 1000;
+      padding: 2px;
+    }
+    .controls > button {
+      padding: 10px;
+      background-color: #000;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="main">
+    <div class="controls">
+      <button type="button" id="start">Start</button>
+      <button type="button" id="stop">Stop</button>
+    </div>
+    <div id="stage" class="stage"></div>
+  </div>
+  <script type="text/javascript">
+    const VALID_RIGHT_ANGLE_LOCATIONS = ['top-right', 'top-left', 'bottom-right', 'bottom-left'];
+    const getTriangle = ({ width, height, rightAngleLocation = 'top-right', color = 'black' }) => {
+      if (!VALID_RIGHT_ANGLE_LOCATIONS.includes(rightAngleLocation)) {
+        throw new Error(`Invalid right angle location: ${rightAngleLocation}`);
+      }
+
+      switch (rightAngleLocation) {
+        case 'top-right':
+          return `<div style="border-top: 0 solid transparent; border-bottom: ${height} solid transparent; border-right: ${width} solid ${color};"></div>`;
+        case 'top-left':
+          return `<div style="border-top: 0 solid transparent; border-bottom: ${height} solid transparent; border-left: ${width} solid ${color};"></div>`;
+        case 'bottom-right':
+          return `<div style="border-top: ${height} solid transparent; border-bottom: 0 solid transparent; border-right: ${width} solid ${color};"></div>`;
+        case 'bottom-left':
+          return `<div style="border-top: ${height} solid transparent; border-bottom: 0 solid transparent; border-left: ${width} solid ${color};"></div>`;
+        default:
+          throw new Error(`Invalid right angle location: ${rightAngleLocation}`);
+      }
+    }
+
+    const main = () => {
+      const main = document.getElementById('main');
+      const stage = document.getElementById('stage');
+      const startButton = document.getElementById('start');
+      const stopButton = document.getElementById('stop');
+      let LOOPING = true;
+      let START_TIME;
+      const SPEED = window.innerHeight / 60000; // How many pixels to move per second
+      const start = () => {
+        LOOPING = true;
+        START_TIME = Date.now();
+        loop();
+      }
+      const stop = () => {
+        LOOPING = false;
+      }
+      const loop = ((stage) => {
+        const time = Date.now() - START_TIME;
+        const n = Math.floor(time * SPEED);
+        const height = `${n % 100}vh`;
+        const width = `100vw`;
+        const rightAngleLocation = 'top-right';
+        const color = 'red';
+        stage.innerHTML = getTriangle({ width, height, rightAngleLocation, color });
+        if (LOOPING) {
+          requestAnimationFrame(loop);
+        }
+      }).bind(this, stage);
+      startButton.addEventListener('click', start);
+      stopButton.addEventListener('click', stop);
+    }
+    document.addEventListener('DOMContentLoaded', main);
+  </script>
+</body>
+
+</html>
