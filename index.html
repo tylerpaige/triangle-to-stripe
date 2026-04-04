@@ -263,6 +263,25 @@
       }
     };
 
+    /**
+     * Rotates label text around the viewBox center so it reads along the hypotenuse
+     * (textPath alone leaves glyphs mis-rotated per corner).
+     */
+    const hypotenuseTextTransform = (rightAngleLocation) => {
+      switch (rightAngleLocation) {
+        case 'top-right':
+          return 'rotate(90 50 50)';
+        case 'bottom-right':
+          return 'rotate(270 50 50)';
+        case 'top-left':
+          return 'rotate(180 50 50)';
+        case 'bottom-left':
+          return 'rotate(180 50 50)';
+        default:
+          return '';
+      }
+    };
+
     const scriptLineForTriangle = (chronologicalIndex) => {
       if (!SCRIPT.length) return '';
       return SCRIPT[chronologicalIndex % SCRIPT.length];
@@ -302,14 +321,17 @@
           const line = scriptLineForTriangle(chronologicalIndex);
           const pathId = `hypo-path-${i}`;
           const pathD = hypotenusePathD(rightAngleLocation);
+          const textTransform = hypotenuseTextTransform(rightAngleLocation);
           const labelSvg =
             hv < 1e-6 || !line
               ? ''
               : `<svg class="hypotenuse-svg" viewBox="0 0 100 100" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <defs><path id="${pathId}" d="${pathD}" /></defs>
-  <text font-size="4.2" dominant-baseline="middle">
-    <textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escapeHtml(line)}</textPath>
-  </text>
+  <g transform="${textTransform}">
+    <text font-size="4.2" dominant-baseline="bottom">
+      <textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escapeHtml(line)}</textPath>
+    </text>
+  </g>
 </svg>`;
           return `<div class="stack-layer" style="height:${hv}vh; background-color: ${color_b}">${inner}${labelSvg}</div>`;
         })
