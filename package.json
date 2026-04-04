@@ -1,8 +1,7 @@
 {
   "name": "triangles-to-stripes",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Scroll-driven triangle stack animation (static HTML + GSAP)",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

@@ -120,7 +120,7 @@
 
 <body>
   <section class="triangles-section" id="triangles-section">
-    <div id="stage" class="stage"></div>
+    <div id="stage"></div>
   </section>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
@@ -327,8 +327,6 @@
         keyframes.push({ t: totalVirtualMs, heights: h.slice() });
       }
 
-      refreshKeyframeLabelAngles(keyframes);
-
       return { keyframes, totalVirtualMs };
     };
 
@@ -388,26 +386,6 @@
           deg = 0;
       }
       return deg;
-    };
-
-    /** Per-layer label angles (deg) for a height snapshot; uses W/H in px. */
-    const labelAnglesDegForHeights = (heights, W, H) => {
-      const n = heights.length;
-      return heights.map((hv, i) => {
-        const chronologicalIndex = n - 1 - i;
-        const loc = rightAngleLocationForChronologicalIndex(chronologicalIndex);
-        const layerH = (Math.max(0, hv) / 100) * H;
-        return hypotenuseLabelAngleDeg(loc, W, layerH);
-      });
-    };
-
-    /** Recompute `labelAnglesDeg` on every keyframe (call on resize; angles depend on aspect ratio). */
-    const refreshKeyframeLabelAngles = (keyframes) => {
-      const iw = window.innerWidth;
-      const ih = window.innerHeight;
-      for (const kf of keyframes) {
-        kf.labelAnglesDeg = labelAnglesDegForHeights(kf.heights, iw, ih);
-      }
     };
 
     const scriptLineForTriangle = (chronologicalIndex) => {
@@ -705,12 +683,6 @@
        * would run `stopHoldAdvance()` again and kill the double-tap gsap tween immediately.
        */
       const onHoldPointerCancel = (e) => {
-        tapLog(e.type, {
-          pointerId: e.pointerId,
-          pointerType: e.pointerType,
-          button: e.button,
-          lastTapTsBefore: lastTapTs,
-        });
         releaseSectionPointer(e);
         const wasAdvancing = holdRafId != null;
         stopHoldAdvance();
@@ -732,7 +704,6 @@
           doubleTapTween.kill();
           doubleTapTween = null;
         }
-        refreshKeyframeLabelAngles(keyframes);
         const h = heightsAtProgress(keyframes, lastProgress);
         renderStack(stage, h, prevHeights);
         ScrollTrigger.refresh();
