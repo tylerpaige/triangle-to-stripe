@@ -108,6 +108,12 @@
       position: relative;
       width: 100%;
       min-height: 100vh;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+      touch-action: manipulation;
     }
   </style>
 </head>
@@ -147,6 +153,27 @@
     const SCROLL_KEYFRAME_CAP = 4000;
     /** Pixels of scroll while the triangles section is pinned (animation maps 0→1). */
     const SCROLL_ANIMATION_DISTANCE_PX = 4500;
+    /**
+     * While pressing and holding the triangles section, progress changes at this rate
+     * (0–1 of the full animation per second). Lower half of the viewport scrubs forward;
+     * upper half scrubs backward. Set to 0 to disable.
+     */
+    const AUTO_HOLD_PROGRESS_PER_SECOND = 0.1;
+    /** Wait this long after press before auto-advance starts (avoids fighting scroll gestures). */
+    const AUTO_HOLD_DELAY_MS = 350;
+    /** If the pointer moves farther than this before hold kicks in, cancel (user is scrolling). */
+    const AUTO_HOLD_MOVE_CANCEL_PX = 14;
+    /**
+     * Double-tap skip magnitude (0.1 = 10% of the animation). Sign follows viewport half:
+     * lower half skips forward, upper half skips backward.
+     */
+    const DOUBLE_TAP_SKIP_FRAC = 0.1;
+    /** Max ms between the two taps’ pointerup for a double-tap. */
+    const DOUBLE_TAP_MAX_INTERVAL_MS = 320;
+    /** Max px between tap locations (second pointerup vs first pointerup). */
+    const DOUBLE_TAP_MAX_DISTANCE_PX = 45;
+    /** Seconds to tween the double-tap skip (smoothly animates that progress delta). */
+    const DOUBLE_TAP_ANIM_DURATION_SEC = 1;
     /**
      * Lines shown along each triangle’s hypotenuse, in chronological order (oldest
      * triangle first). If there are fewer entries than triangles, the list repeats.
@@ -269,7 +296,7 @@
      */
     const buildScrollKeyframes = () => {
       const dt = 1;
-      let h = [0];
+      let h = [100];
       let t = 0;
       let guard = 0;
       const maxGuard = 50_000_000;
@@ -281,9 +308,9 @@
       const totalVirtualMs = t;
 
       const interval = Math.max(dt, totalVirtualMs / SCROLL_KEYFRAME_CAP);
-      h = [0];
+      h = [100];
       t = 0;
-      const keyframes = [{ t: 0, heights: [0] }];
+      const keyframes = [{ t: 0, heights: [100] }];
       let nextSample = interval;
       guard = 0;
       while (!simulationComplete(h) && guard < maxGuard) {
@@ -469,7 +496,6 @@
       const section = document.getElementById('triangles-section');
 
       const { keyframes } = buildScrollKeyframes();
-      console.log(keyframes);
 
       gsap.registerPlugin(ScrollTrigger);
 
@@ -477,7 +503,7 @@
       let lastProgress = 0;
       renderStack(stage, keyframes[0].heights, prevHeights);
 
-      ScrollTrigger.create({
+      const scrollTrigger = ScrollTrigger.create({
         trigger: section,
         start: 'top top',
         end: `+=${SCROLL_ANIMATION_DISTANCE_PX}`,
@@ -492,7 +518,220 @@
         },
       });
 
+      let holdRafId = null;
+      let holdLastTs = null;
+      let holdDelayTimer = null;
+      let holdPressClientX = 0;
+      let holdPressClientY = 0;
+      let lastTapTs = 0;
+      let lastTapX = 0;
+      let lastTapY = 0;
+      let doubleTapTween = null;
+      /** Set on pointerdown: lower viewport half = forward, upper half = reverse. */
+      let holdForward = true;
+
+      const isLowerHalfViewport = (clientY) => clientY >= window.innerHeight * 0.5;
+
+      /** Only ignore non-primary mouse buttons; touch/pen use varying `button` values on pointerup. */
+      const isPrimaryPointerDown = (e) =>
+        e.pointerType !== 'mouse' || e.button === 0;
+      const isPrimaryPointerUp = (e) =>
+        e.pointerType !== 'mouse' || e.button === 0;
+
+      const stopHoldAdvance = () => {
+        if (doubleTapTween) {
+          doubleTapTween.kill();
+          doubleTapTween = null;
+        }
+        if (holdDelayTimer != null) {
+          clearTimeout(holdDelayTimer);
+          holdDelayTimer = null;
+        }
+        if (holdRafId != null) {
+          cancelAnimationFrame(holdRafId);
+          holdRafId = null;
+        }
+        holdLastTs = null;
+      };
+
+      /** Snap document scroll to match progress (keeps ScrollTrigger in sync after hold or jump). */
+      const scrollToProgress = (p) => {
+        const clamped = Math.max(0, Math.min(1, p));
+        const y = scrollTrigger.start + clamped * (scrollTrigger.end - scrollTrigger.start);
+        window.scrollTo(0, y);
+      };
+
+      const applyProgress = (p) => {
+        lastProgress = Math.max(0, Math.min(1, p));
+        scrollToProgress(lastProgress);
+        const h = heightsAtProgress(keyframes, lastProgress);
+        renderStack(stage, h, prevHeights);
+        prevHeights = h.slice();
+      };
+
+      /**
+       * During hold we advance progress and render directly so scrub smoothing does not lag
+       * behind rapid programmatic updates. Scroll is synced on release.
+       */
+      const tickHoldAdvance = (ts) => {
+        if (holdRafId == null || AUTO_HOLD_PROGRESS_PER_SECOND <= 0) return;
+        let dt = 0;
+        if (holdLastTs != null) dt = (ts - holdLastTs) / 1000;
+        holdLastTs = ts;
+        const step = AUTO_HOLD_PROGRESS_PER_SECOND * dt;
+        if (holdForward) {
+          lastProgress = Math.min(1, lastProgress + step);
+        } else {
+          lastProgress = Math.max(0, lastProgress - step);
+        }
+        const h = heightsAtProgress(keyframes, lastProgress);
+        renderStack(stage, h, prevHeights);
+        prevHeights = h.slice();
+        const atEnd = holdForward ? lastProgress >= 1 - 1e-6 : lastProgress <= 1e-6;
+        if (!atEnd) {
+          holdRafId = requestAnimationFrame(tickHoldAdvance);
+        } else {
+          holdRafId = null;
+          holdLastTs = null;
+          scrollToProgress(lastProgress);
+        }
+      };
+
+      const startHoldAdvanceAfterDelay = () => {
+        holdDelayTimer = null;
+        if (AUTO_HOLD_PROGRESS_PER_SECOND <= 0) return;
+        holdRafId = requestAnimationFrame(tickHoldAdvance);
+      };
+
+      const onHoldPointerDown = (e) => {
+        if (AUTO_HOLD_PROGRESS_PER_SECOND <= 0) {
+          return;
+        }
+        if (!isPrimaryPointerDown(e)) {
+          return;
+        }
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch (_) {}
+        stopHoldAdvance();
+        holdForward = isLowerHalfViewport(e.clientY);
+        holdPressClientX = e.clientX;
+        holdPressClientY = e.clientY;
+        holdDelayTimer = window.setTimeout(startHoldAdvanceAfterDelay, AUTO_HOLD_DELAY_MS);
+      };
+
+      const onHoldPointerMove = (e) => {
+        if (holdDelayTimer == null) return;
+        const dx = e.clientX - holdPressClientX;
+        const dy = e.clientY - holdPressClientY;
+        if (dx * dx + dy * dy > AUTO_HOLD_MOVE_CANCEL_PX * AUTO_HOLD_MOVE_CANCEL_PX) {
+          stopHoldAdvance();
+        }
+      };
+
+      const releaseSectionPointer = (e) => {
+        try {
+          if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          }
+        } catch (_) {}
+      };
+
+      const onHoldPointerEnd = (e) => {
+        if (!isPrimaryPointerUp(e)) {
+          return;
+        }
+        const now = performance.now();
+
+        if (lastTapTs > 0) {
+          const dt = now - lastTapTs;
+          const dx = e.clientX - lastTapX;
+          const dy = e.clientY - lastTapY;
+          const distSq = dx * dx + dy * dy;
+          const maxD = DOUBLE_TAP_MAX_DISTANCE_PX;
+          const maxDistSq = maxD * maxD;
+          const timeOk = dt <= DOUBLE_TAP_MAX_INTERVAL_MS;
+          const distOk = distSq <= maxDistSq;
+          if (timeOk && distOk) {
+            releaseSectionPointer(e);
+            stopHoldAdvance();
+            lastTapTs = 0;
+            const from = lastProgress;
+            const forward = isLowerHalfViewport(e.clientY);
+            const to = forward
+              ? Math.min(1, from + DOUBLE_TAP_SKIP_FRAC)
+              : Math.max(0, from - DOUBLE_TAP_SKIP_FRAC);
+
+            if (Math.abs(to - from) < 1e-9) {
+              applyProgress(from);
+              return;
+            }
+            const state = { p: from };
+            doubleTapTween = gsap.to(state, {
+              p: to,
+              duration: DOUBLE_TAP_ANIM_DURATION_SEC,
+              ease: 'power2.out',
+              onUpdate: () => {
+                lastProgress = state.p;
+                scrollToProgress(lastProgress);
+                const h = heightsAtProgress(keyframes, lastProgress);
+                renderStack(stage, h, prevHeights);
+                prevHeights = h.slice();
+              },
+              onComplete: () => {
+                doubleTapTween = null;
+                applyProgress(to);
+              },
+            });
+            return;
+          }
+        }
+
+        releaseSectionPointer(e);
+        const wasAdvancing = holdRafId != null;
+        stopHoldAdvance();
+        if (wasAdvancing) {
+          applyProgress(lastProgress);
+        }
+
+        lastTapTs = now;
+        lastTapX = e.clientX;
+        lastTapY = e.clientY;
+      };
+
+      /**
+       * True cancellation (e.g. touch scroll takeover). Do not use for `lostpointercapture`:
+       * that event also fires after we call `releasePointerCapture` in pointerup; handling it
+       * would run `stopHoldAdvance()` again and kill the double-tap gsap tween immediately.
+       */
+      const onHoldPointerCancel = (e) => {
+        tapLog(e.type, {
+          pointerId: e.pointerId,
+          pointerType: e.pointerType,
+          button: e.button,
+          lastTapTsBefore: lastTapTs,
+        });
+        releaseSectionPointer(e);
+        const wasAdvancing = holdRafId != null;
+        stopHoldAdvance();
+        if (wasAdvancing) {
+          applyProgress(lastProgress);
+        }
+      };
+
+      section.addEventListener('selectstart', (e) => e.preventDefault());
+      section.addEventListener('dragstart', (e) => e.preventDefault());
+      section.addEventListener('contextmenu', (e) => e.preventDefault());
+      section.addEventListener('pointerdown', onHoldPointerDown);
+      section.addEventListener('pointermove', onHoldPointerMove);
+      section.addEventListener('pointerup', onHoldPointerEnd);
+      section.addEventListener('pointercancel', onHoldPointerCancel);
+
       window.addEventListener('resize', () => {
+        if (doubleTapTween) {
+          doubleTapTween.kill();
+          doubleTapTween = null;
+        }
         refreshKeyframeLabelAngles(keyframes);
         const h = heightsAtProgress(keyframes, lastProgress);
         renderStack(stage, h, prevHeights);
