@@ -51,7 +51,6 @@
   </div>
   <script type="text/javascript">
 
-    
     /** Minimum height of a triangle in vh, as they shrink down to make room for others */
     const MIN_VH = 0.5;
     /** vh grown per millisecond (same scale as before: ~100vh per 60s for the first triangle) */
@@ -118,12 +117,28 @@
       return [0, ...heights];
     };
 
+    const COLOR_COMBINATIONS = [
+      { color_a: 'tomato', color_b: 'skyblue' },
+      { color_a: 'burlywood', color_b: 'yellowgreen' },
+      { color_a: 'orange', color_b: 'cornflowerblue' },
+    ];
+
+    /**
+     * How many consecutive triangles (in chronological order, oldest first) share one
+     * color set before advancing to the next in COLOR_COMBINATIONS. Use 2 for every
+     * other triangle switching sets, 3 for every third, etc.
+     */
+    const COLOR_SET_TRIANGLE_CADENCE = 2;
+
+    const colorSetIndexForTriangle = (chronologicalIndex) =>
+      Math.floor(chronologicalIndex / COLOR_SET_TRIANGLE_CADENCE) % COLOR_COMBINATIONS.length;
+
     const renderStack = (stage, heights) => {
-      const color_a = 'tomato';
-      const color_b = 'skyblue';
       const layers = heights
         .map((h, i) => {
           const chronologicalIndex = heights.length - 1 - i;
+          const { color_a, color_b } =
+            COLOR_COMBINATIONS[colorSetIndexForTriangle(chronologicalIndex)];
           // const rightAngleLocation =
           //   chronologicalIndex % 2 === 0 ? 'top-right' : 'bottom-right';
           let rightAngleLocation;
