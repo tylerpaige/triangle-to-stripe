@@ -23,18 +23,16 @@
       overflow: hidden;
       position: relative;
     }
-    .hypotenuse-svg {
+    .hypotenuse-label {
       position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      overflow: visible;
-    }
-    .hypotenuse-svg text {
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%) rotate(var(--hypo-angle, 0deg));
+      transform-origin: center center;
       font-family: system-ui, sans-serif;
       font-weight: 600;
+      white-space: nowrap;
+      pointer-events: none;
     }
     .triangles-section {
       position: relative;
@@ -106,13 +104,13 @@
 
       switch (rightAngleLocation) {
         case 'top-right':
-          return `<div style="border-top: 0 solid transparent; border-bottom: ${height} solid transparent; border-right: ${width} solid ${color};"></div>`;
+          return `<div data-right-angle-location="top-right" style="border-top: 0 solid transparent; border-bottom: ${height} solid transparent; border-right: ${width} solid ${color};"></div>`;
         case 'top-left':
-          return `<div style="border-top: 0 solid transparent; border-bottom: ${height} solid transparent; border-left: ${width} solid ${color};"></div>`;
+          return `<div data-right-angle-location="top-left" style="border-top: 0 solid transparent; border-bottom: ${height} solid transparent; border-left: ${width} solid ${color};"></div>`;
         case 'bottom-right':
-          return `<div style="border-top: ${height} solid transparent; border-bottom: 0 solid transparent; border-right: ${width} solid ${color};"></div>`;
+          return `<div data-right-angle-location="bottom-right" style="border-top: ${height} solid transparent; border-bottom: 0 solid transparent; border-right: ${width} solid ${color};"></div>`;
         case 'bottom-left':
-          return `<div style="border-top: ${height} solid transparent; border-bottom: 0 solid transparent; border-left: ${width} solid ${color};"></div>`;
+          return `<div data-right-angle-location="bottom-left" style="border-top: ${height} solid transparent; border-bottom: 0 solid transparent; border-left: ${width} solid ${color};"></div>`;
         default:
           throw new Error(`Invalid right angle location: ${rightAngleLocation}`);
       }
@@ -244,40 +242,23 @@
         .replace(/"/g, '&quot;');
 
     /**
-     * Unit hypotenuse in viewBox "0 0 100 100" matching getTriangle orientations
-     * (right angle at the named corner of the triangle’s bounding box).
+     * Degrees to rotate a horizontal baseline so it matches the hypotenuse through
+     * the layer center. Directions match the former SVG paths (viewBox y-down):
+     * top-right M 0,1 → 1,0 · bottom-right M 0,0 → 1,1 · top-left M 1,0 → 0,1 · bottom-left M 1,1 → 0,0
      */
-    const hypotenusePathD = (rightAngleLocation) => {
+    const hypotenuseLabelAngleDeg = (rightAngleLocation, W, H) => {
+      const toDeg = (r) => (r * 180) / Math.PI;
       switch (rightAngleLocation) {
         case 'top-right':
-          return 'M 0 100 L 100 0';
+          return toDeg(Math.atan2(-H, W));
         case 'bottom-right':
-          return 'M 0 0 L 100 100';
+          return toDeg(Math.atan2(H, W));
         case 'top-left':
-          return 'M 100 0 L 0 100';
+          return toDeg(Math.atan2(-H, W));
         case 'bottom-left':
-          return 'M 100 100 L 0 0';
+          return toDeg(Math.atan2(H, W));
         default:
-          return 'M 0 100 L 100 0';
-      }
-    };
-
-    /**
-     * Rotates label text around the viewBox center so it reads along the hypotenuse
-     * (textPath alone leaves glyphs mis-rotated per corner).
-     */
-    const hypotenuseTextTransform = (rightAngleLocation) => {
-      switch (rightAngleLocation) {
-        case 'top-right':
-          return 'rotate(90 50 50)';
-        case 'bottom-right':
-          return 'rotate(270 50 50)';
-        case 'top-left':
-          return 'rotate(180 50 50)';
-        case 'bottom-left':
-          return 'rotate(180 50 50)';
-        default:
-          return '';
+          return 0;
       }
     };
 
@@ -287,6 +268,7 @@
     };
 
     const renderStack = (stage, heights) => {
+      const maxTopVhForStack = maxTopVh(heights);
       const layers = heights
         .map((h, i) => {
           const chronologicalIndex = heights.length - 1 - i;
@@ -318,21 +300,29 @@
                   color: triangleColor,
                 });
           const line = scriptLineForTriangle(chronologicalIndex);
-          const pathId = `hypo-path-${i}`;
-          const pathD = hypotenusePathD(rightAngleLocation);
-          const textTransform = hypotenuseTextTransform(rightAngleLocation);
-          const labelSvg =
+          const iw = window.innerWidth;
+          const ih = window.innerHeight;
+          const layerW = iw;
+          const layerH = (hv / 100) * ih;
+          const baseAngleDeg = hypotenuseLabelAngleDeg(rightAngleLocation, layerW, layerH);
+          /**
+           * Same 4-cycle as `rightAngleLocation`: ≡0 (mod 4) +90° CW, ≡1 −90° CCW, ≡2,3 no nudge.
+           * Positions 2–3 use hypotenuse-only atan2; blended nudge on those corners read wrong when thin.
+           */
+          const mod4 = chronologicalIndex % 4;
+          const cycleNudgeDeg =
+            mod4 === 0 ? 90 : mod4 === 1 ? -90 : 0;
+          /** Fade nudge out toward MIN_VH: full only when the strip is tall; thin strips use hypotenuse angle only. */
+          const nudgeBlend =
+            maxTopVhForStack <= MIN_VH + 1e-9
+              ? 0
+              : Math.max(0, Math.min(1, (hv - MIN_VH) / (maxTopVhForStack - MIN_VH)));
+          const angleDeg = baseAngleDeg + cycleNudgeDeg * nudgeBlend;
+          const labelSpan =
             hv < 1e-6 || !line
               ? ''
-              : `<svg class="hypotenuse-svg" viewBox="0 0 100 100" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-  <defs><path id="${pathId}" d="${pathD}" /></defs>
-  <g transform="${textTransform}">
-    <text fill="${textColor}" font-size="4.2" dominant-baseline="bottom">
-      <textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escapeHtml(line)}</textPath>
-    </text>
-  </g>
-</svg>`;
-          return `<div class="stack-layer" style="height:${hv}vh; background-color: ${backgroundColor}">${inner}${labelSvg}</div>`;
+              : `<span class="hypotenuse-label" style="color: ${textColor}; --hypo-angle: ${angleDeg}deg" aria-hidden="true">${escapeHtml(line)}</span>`;
+          return `<div class="stack-layer" style="height:${hv}vh; background-color: ${backgroundColor}">${inner}${labelSpan}</div>`;
         })
         .join('');
       stage.innerHTML = `<div class="stack">${layers}</div>`;
