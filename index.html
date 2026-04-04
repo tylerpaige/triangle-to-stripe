@@ -33,10 +33,8 @@
       overflow: visible;
     }
     .hypotenuse-svg text {
-      fill: rgba(255, 255, 255, 0.92);
       font-family: system-ui, sans-serif;
       font-weight: 600;
-      text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
     }
     .triangles-section {
       position: relative;
@@ -58,10 +56,11 @@
     ** CONFIGURATION **
     *******************
     */
+    /** triangleColor: triangle fill, backgroundColor: strip background, textColor: hypotenuse label */
     const COLOR_COMBINATIONS = [
-      { color_a: 'tomato', color_b: 'skyblue' },
-      { color_a: 'burlywood', color_b: 'yellowgreen' },
-      { color_a: 'orange', color_b: 'cornflowerblue' },
+      { triangleColor: 'tomato', backgroundColor: 'skyblue', textColor: 'midnightblue' },
+      { triangleColor: 'burlywood', backgroundColor: 'yellowgreen', textColor: 'saddlebrown' },
+      { triangleColor: 'orange', backgroundColor: 'cornflowerblue', textColor: 'ivory' },
     ];
     /** How many consecutive triangles (in chronological order, oldest first) share one
      * color set before advancing to the next in COLOR_COMBINATIONS. Use 2 for every
@@ -291,7 +290,7 @@
       const layers = heights
         .map((h, i) => {
           const chronologicalIndex = heights.length - 1 - i;
-          const { color_a, color_b } =
+          const { triangleColor, backgroundColor, textColor } =
             COLOR_COMBINATIONS[colorSetIndexForTriangle(chronologicalIndex)];
           let rightAngleLocation;
           switch (chronologicalIndex % 4) {
@@ -316,7 +315,7 @@
                   width: '100vw',
                   height: `${hv}vh`,
                   rightAngleLocation,
-                  color: color_a,
+                  color: triangleColor,
                 });
           const line = scriptLineForTriangle(chronologicalIndex);
           const pathId = `hypo-path-${i}`;
@@ -328,12 +327,12 @@
               : `<svg class="hypotenuse-svg" viewBox="0 0 100 100" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <defs><path id="${pathId}" d="${pathD}" /></defs>
   <g transform="${textTransform}">
-    <text font-size="4.2" dominant-baseline="bottom">
+    <text fill="${textColor}" font-size="4.2" dominant-baseline="bottom">
       <textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escapeHtml(line)}</textPath>
     </text>
   </g>
 </svg>`;
-          return `<div class="stack-layer" style="height:${hv}vh; background-color: ${color_b}">${inner}${labelSvg}</div>`;
+          return `<div class="stack-layer" style="height:${hv}vh; background-color: ${backgroundColor}">${inner}${labelSvg}</div>`;
         })
         .join('');
       stage.innerHTML = `<div class="stack">${layers}</div>`;
