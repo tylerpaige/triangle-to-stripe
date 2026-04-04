@@ -21,6 +21,22 @@
       flex-shrink: 0;
       width: 100%;
       overflow: hidden;
+      position: relative;
+    }
+    .hypotenuse-svg {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      overflow: visible;
+    }
+    .hypotenuse-svg text {
+      fill: rgba(255, 255, 255, 0.92);
+      font-family: system-ui, sans-serif;
+      font-weight: 600;
+      text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
     }
     .triangles-section {
       position: relative;
@@ -59,6 +75,16 @@
     const SCROLL_KEYFRAME_CAP = 4000;
     /** Pixels of scroll while the triangles section is pinned (animation maps 0→1). */
     const SCROLL_ANIMATION_DISTANCE_PX = 4500;
+    /**
+     * Lines shown along each triangle’s hypotenuse, in chronological order (oldest
+     * triangle first). If there are fewer entries than triangles, the list repeats.
+     */
+    const SCRIPT = [
+      'First light',
+      'Second wave',
+      'Third breath',
+      'Fourth fold',
+    ];
 
     /*
     ***************
@@ -211,6 +237,37 @@
     const colorSetIndexForTriangle = (chronologicalIndex) =>
       Math.floor(chronologicalIndex / COLOR_SET_TRIANGLE_CADENCE) % COLOR_COMBINATIONS.length;
 
+    const escapeHtml = (s) =>
+      String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+    /**
+     * Unit hypotenuse in viewBox "0 0 100 100" matching getTriangle orientations
+     * (right angle at the named corner of the triangle’s bounding box).
+     */
+    const hypotenusePathD = (rightAngleLocation) => {
+      switch (rightAngleLocation) {
+        case 'top-right':
+          return 'M 0 100 L 100 0';
+        case 'bottom-right':
+          return 'M 0 0 L 100 100';
+        case 'top-left':
+          return 'M 100 0 L 0 100';
+        case 'bottom-left':
+          return 'M 100 100 L 0 0';
+        default:
+          return 'M 0 100 L 100 0';
+      }
+    };
+
+    const scriptLineForTriangle = (chronologicalIndex) => {
+      if (!SCRIPT.length) return '';
+      return SCRIPT[chronologicalIndex % SCRIPT.length];
+    };
+
     const renderStack = (stage, heights) => {
       const layers = heights
         .map((h, i) => {
@@ -242,7 +299,19 @@
                   rightAngleLocation,
                   color: color_a,
                 });
-          return `<div class="stack-layer" style="height:${hv}vh; background-color: ${color_b}">${inner}</div>`;
+          const line = scriptLineForTriangle(chronologicalIndex);
+          const pathId = `hypo-path-${i}`;
+          const pathD = hypotenusePathD(rightAngleLocation);
+          const labelSvg =
+            hv < 1e-6 || !line
+              ? ''
+              : `<svg class="hypotenuse-svg" viewBox="0 0 100 100" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <defs><path id="${pathId}" d="${pathD}" /></defs>
+  <text font-size="4.2" dominant-baseline="middle">
+    <textPath href="#${pathId}" startOffset="50%" text-anchor="middle">${escapeHtml(line)}</textPath>
+  </text>
+</svg>`;
+          return `<div class="stack-layer" style="height:${hv}vh; background-color: ${color_b}">${inner}${labelSvg}</div>`;
         })
         .join('');
       stage.innerHTML = `<div class="stack">${layers}</div>`;
