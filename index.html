@@ -7,6 +7,7 @@
     body {
       margin: 0;
       overflow-x: hidden;
+      background-color: #111;
     }
     .stack {
       display: flex;
@@ -21,43 +22,57 @@
       width: 100%;
       overflow: hidden;
     }
-    .controls {
-      display: flex;
-      flex-direction: row;
-      gap: 2px;
-      position: fixed;
-      top: 0;
-      left: 0;
-      z-index: 1000;
-      padding: 2px;
-    }
-    .controls > button {
-      padding: 10px;
-      background-color: #000;
-      color: #fff;
-      border: none;
-      cursor: pointer;
+    .triangles-section {
+      position: relative;
+      width: 100%;
+      min-height: 100vh;
     }
   </style>
 </head>
 
 <body>
-  <div id="main">
-    <div class="controls">
-      <button type="button" id="start">Start</button>
-      <button type="button" id="stop">Stop</button>
-    </div>
+  <section class="triangles-section" id="triangles-section">
     <div id="stage" class="stage"></div>
-  </div>
+  </section>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
   <script type="text/javascript">
-
+    /*
+    *******************
+    ** CONFIGURATION **
+    *******************
+    */
+    const COLOR_COMBINATIONS = [
+      { color_a: 'tomato', color_b: 'skyblue' },
+      { color_a: 'burlywood', color_b: 'yellowgreen' },
+      { color_a: 'orange', color_b: 'cornflowerblue' },
+    ];
+    /** How many consecutive triangles (in chronological order, oldest first) share one
+     * color set before advancing to the next in COLOR_COMBINATIONS. Use 2 for every
+     * other triangle switching sets, 3 for every third, etc. */
+    const COLOR_SET_TRIANGLE_CADENCE = 2;
     /** Minimum height of a triangle in vh, as they shrink down to make room for others */
     const MIN_VH = 0.5;
-    /** vh grown per millisecond (same scale as before: ~100vh per 60s for the first triangle) */
+    /** vh grown per millisecond of virtual time (used only to build the scroll timeline) */
     const VH_PER_MS = 100 / 100;
+    /** Max keyframes for scroll scrub (higher = smoother, more build time). */
+    const SCROLL_KEYFRAME_CAP = 4000;
+    /** Pixels of scroll while the triangles section is pinned (animation maps 0→1). */
+    const SCROLL_ANIMATION_DISTANCE_PX = 4500;
 
+    /*
+    ***************
+    ** CONSTANTS **
+    ***************
+    */
     const VALID_RIGHT_ANGLE_LOCATIONS = ['top-right', 'top-left', 'bottom-right', 'bottom-left'];
     const TRIANGLE_TARGET = 100 / MIN_VH;
+
+    /*
+    ***************
+    ** FUNCTIONS **
+    ***************
+    */
 
     const getTriangle = ({ width, height, rightAngleLocation = 'top-right', color = 'black' }) => {
       if (!VALID_RIGHT_ANGLE_LOCATIONS.includes(rightAngleLocation)) {
@@ -78,8 +93,6 @@
       }
     }
 
-  
-
     /**
      * Heights in vh, top-first: index 0 is the newest / growing triangle.
      * Sum is always 100. Each layer below the top may shrink down to MIN_VH, so the
@@ -91,9 +104,6 @@
       return 100 - (n - 1) * MIN_VH;
     };
 
-    /**
-     * Increase the top triangle by dh vh; remove height from layers below, bottom-first.
-     */
     const growTop = (heights, dh) => {
       if (heights.length <= 1 || dh <= 0) return heights;
       const out = heights.slice();
@@ -117,18 +127,86 @@
       return [0, ...heights];
     };
 
-    const COLOR_COMBINATIONS = [
-      { color_a: 'tomato', color_b: 'skyblue' },
-      { color_a: 'burlywood', color_b: 'yellowgreen' },
-      { color_a: 'orange', color_b: 'cornflowerblue' },
-    ];
+    /**
+     * One virtual-time step (same rules as the former rAF loop).
+     * @param {number[]} heights
+     * @param {number} dt ms
+     */
+    const stepHeights = (heights, dt) => {
+      if (heights.length === 1) {
+        let h = [Math.min(100, heights[0] + VH_PER_MS * dt)];
+        if (h[0] >= 100 - 1e-6) {
+          h = maybeAddTriangle(h);
+        }
+        return h;
+      }
+      let h = heights;
+      const cap = maxTopVh(h);
+      const room = cap - h[0];
+      if (room > 1e-9) {
+        const step = Math.min(room, VH_PER_MS * dt);
+        h = growTop(h, step);
+      }
+      if (h[0] >= maxTopVh(h) - 1e-6 && h.length < TRIANGLE_TARGET) {
+        h = maybeAddTriangle(h);
+      }
+      return h;
+    };
+
+    const simulationComplete = (heights) => {
+      const cap = maxTopVh(heights);
+      return (
+        heights.length >= TRIANGLE_TARGET &&
+        heights[0] >= cap - 1e-3 &&
+        heights.slice(1).every((x) => Math.abs(x - MIN_VH) < 1e-2)
+      );
+    };
 
     /**
-     * How many consecutive triangles (in chronological order, oldest first) share one
-     * color set before advancing to the next in COLOR_COMBINATIONS. Use 2 for every
-     * other triangle switching sets, 3 for every third, etc.
+     * Run the full simulation with fixed dt; return total virtual ms and subsampled keyframes.
      */
-    const COLOR_SET_TRIANGLE_CADENCE = 2;
+    const buildScrollKeyframes = () => {
+      const dt = 1;
+      let h = [0];
+      let t = 0;
+      let guard = 0;
+      const maxGuard = 50_000_000;
+      while (!simulationComplete(h) && guard < maxGuard) {
+        h = stepHeights(h, dt);
+        t += dt;
+        guard++;
+      }
+      const totalVirtualMs = t;
+
+      const interval = Math.max(dt, totalVirtualMs / SCROLL_KEYFRAME_CAP);
+      h = [0];
+      t = 0;
+      const keyframes = [{ t: 0, heights: [0] }];
+      let nextSample = interval;
+      guard = 0;
+      while (!simulationComplete(h) && guard < maxGuard) {
+        h = stepHeights(h, dt);
+        t += dt;
+        guard++;
+        if (t >= nextSample - 1e-9) {
+          keyframes.push({ t, heights: h.slice() });
+          nextSample += interval;
+        }
+      }
+      const last = keyframes[keyframes.length - 1];
+      if (!last || last.t < totalVirtualMs - 1e-6 || last.heights.length !== h.length) {
+        keyframes.push({ t: totalVirtualMs, heights: h.slice() });
+      }
+
+      return { keyframes, totalVirtualMs };
+    };
+
+    const heightsAtProgress = (keyframes, p) => {
+      if (keyframes.length === 0) return [0];
+      const clamped = Math.max(0, Math.min(1, p));
+      const idx = Math.round(clamped * (keyframes.length - 1));
+      return keyframes[idx].heights.slice();
+    };
 
     const colorSetIndexForTriangle = (chronologicalIndex) =>
       Math.floor(chronologicalIndex / COLOR_SET_TRIANGLE_CADENCE) % COLOR_COMBINATIONS.length;
@@ -139,8 +217,6 @@
           const chronologicalIndex = heights.length - 1 - i;
           const { color_a, color_b } =
             COLOR_COMBINATIONS[colorSetIndexForTriangle(chronologicalIndex)];
-          // const rightAngleLocation =
-          //   chronologicalIndex % 2 === 0 ? 'top-right' : 'bottom-right';
           let rightAngleLocation;
           switch (chronologicalIndex % 4) {
             case 0:
@@ -174,73 +250,30 @@
 
     const main = () => {
       const stage = document.getElementById('stage');
-      const startButton = document.getElementById('start');
-      const stopButton = document.getElementById('stop');
-      let LOOPING = false;
-      let rafId = 0;
-      let lastTs = 0;
-      /** @type {number[]} */
-      let heights = [0];
+      const section = document.getElementById('triangles-section');
 
-      const tick = (ts) => {
-        if (!LOOPING) return;
-        if (lastTs === 0) lastTs = ts;
-        const dt = ts - lastTs;
-        lastTs = ts;
+      const { keyframes } = buildScrollKeyframes();
 
-        if (heights.length === 1) {
-          heights = [Math.min(100, heights[0] + VH_PER_MS * dt)];
-          if (heights[0] >= 100 - 1e-6) {
-            heights = maybeAddTriangle(heights);
-            lastTs = ts;
-          }
-        } else {
-          let h = heights;
-          const cap = maxTopVh(h);
-          const room = cap - h[0];
-          if (room > 1e-9) {
-            const step = Math.min(room, VH_PER_MS * dt);
-            h = growTop(h, step);
-          }
-          heights = h;
-          if (h[0] >= maxTopVh(h) - 1e-6 && h.length < TRIANGLE_TARGET) {
-            heights = maybeAddTriangle(h);
-            lastTs = ts;
-          }
-        }
+      gsap.registerPlugin(ScrollTrigger);
 
-        renderStack(stage, heights);
+      renderStack(stage, keyframes[0].heights);
 
-        const cap = maxTopVh(heights);
-        const done =
-          heights.length >= TRIANGLE_TARGET &&
-          heights[0] >= cap - 1e-3 &&
-          heights.slice(1).every((x) => Math.abs(x - MIN_VH) < 1e-2);
+      ScrollTrigger.create({
+        trigger: section,
+        start: 'top top',
+        end: `+=${SCROLL_ANIMATION_DISTANCE_PX}`,
+        pin: true,
+        scrub: 1,
+        anticipatePin: 1,
+        onUpdate: (self) => {
+          const h = heightsAtProgress(keyframes, self.progress);
+          renderStack(stage, h);
+        },
+      });
 
-        if (!done && LOOPING) {
-          rafId = requestAnimationFrame(tick);
-        } else {
-          LOOPING = false;
-        }
-      };
+      ScrollTrigger.refresh();
+    };
 
-      const start = () => {
-        if (LOOPING) return;
-        LOOPING = true;
-        lastTs = 0;
-        heights = [0];
-        cancelAnimationFrame(rafId);
-        rafId = requestAnimationFrame(tick);
-      };
-
-      const stop = () => {
-        LOOPING = false;
-        cancelAnimationFrame(rafId);
-      };
-
-      startButton.addEventListener('click', start);
-      stopButton.addEventListener('click', stop);
-    }
     document.addEventListener('DOMContentLoaded', main);
   </script>
 </body>
