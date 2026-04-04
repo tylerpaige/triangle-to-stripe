@@ -60,14 +60,17 @@
     */
     /** triangleColor: triangle fill, backgroundColor: strip background, textColor: hypotenuse label */
     const COLOR_COMBINATIONS = [
+      { triangleColor: 'tomato', backgroundColor: 'cornflowerblue', textColor: 'midnightblue' },
       { triangleColor: 'tomato', backgroundColor: 'skyblue', textColor: 'midnightblue' },
+      { triangleColor: 'burlywood', backgroundColor: 'skyblue', textColor: 'saddlebrown' },
       { triangleColor: 'burlywood', backgroundColor: 'yellowgreen', textColor: 'saddlebrown' },
+      { triangleColor: 'orange', backgroundColor: 'yellowgreen', textColor: 'ivory' },
       { triangleColor: 'orange', backgroundColor: 'cornflowerblue', textColor: 'ivory' },
     ];
     /** How many consecutive triangles (in chronological order, oldest first) share one
      * color set before advancing to the next in COLOR_COMBINATIONS. Use 2 for every
      * other triangle switching sets, 3 for every third, etc. */
-    const COLOR_SET_TRIANGLE_CADENCE = 2;
+    const COLOR_SET_TRIANGLE_CADENCE = 1;
     /** Minimum height of a triangle in vh, as they shrink down to make room for others */
     const MIN_VH = 0.5;
     /** Hypotenuse label opacity goes 1→0 across this fraction of the span above MIN_VH (bottom of range = min height). */
