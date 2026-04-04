@@ -9,6 +9,7 @@
       overflow-x: hidden;
       background-color: #111;
     }
+
     .stack {
       display: flex;
       flex-direction: column;
@@ -17,23 +18,26 @@
       height: 100vh;
       flex-shrink: 0;
     }
+
     .stack-layer {
       flex-shrink: 0;
       width: 100%;
       overflow: hidden;
       position: relative;
     }
+
     .hypotenuse-label {
       position: absolute;
       left: 50%;
       top: 50%;
-      transform: translate(-50%, -50%) rotate(var(--hypo-angle, 0deg));
+      transform: translate(-50%, calc(-100% - 0.5em)) rotate(var(--hypo-angle, 0deg));
       transform-origin: center center;
       font-family: system-ui, sans-serif;
       font-weight: 600;
       white-space: nowrap;
       pointer-events: none;
     }
+
     .triangles-section {
       position: relative;
       width: 100%;
@@ -66,6 +70,8 @@
     const COLOR_SET_TRIANGLE_CADENCE = 2;
     /** Minimum height of a triangle in vh, as they shrink down to make room for others */
     const MIN_VH = 0.5;
+    /** Hypotenuse label opacity goes 1→0 across this fraction of the span above MIN_VH (bottom of range = min height). */
+    const LABEL_FADE_ZONE_FRAC = 0.05;
     /** vh grown per millisecond of virtual time (used only to build the scroll timeline) */
     const VH_PER_MS = 100 / 100;
     /** Max keyframes for scroll scrub (higher = smoother, more build time). */
@@ -78,9 +84,13 @@
      */
     const SCRIPT = [
       'First light',
-      'Second wave',
-      'Third breath',
-      'Fourth fold',
+      'Second wind',
+      'Third wave',
+      'Fourth told',
+      'Fifth element',
+      'Sixth hour',
+      'Seventh season',
+      'Eighth attempt',
     ];
 
     /*
@@ -294,11 +304,11 @@
             hv < 1e-6
               ? ''
               : getTriangle({
-                  width: '100vw',
-                  height: `${hv}vh`,
-                  rightAngleLocation,
-                  color: triangleColor,
-                });
+                width: '100vw',
+                height: `${hv}vh`,
+                rightAngleLocation,
+                color: triangleColor,
+              });
           const line = scriptLineForTriangle(chronologicalIndex);
           const iw = window.innerWidth;
           const ih = window.innerHeight;
@@ -318,10 +328,19 @@
               ? 0
               : Math.max(0, Math.min(1, (hv - MIN_VH) / (maxTopVhForStack - MIN_VH)));
           const angleDeg = baseAngleDeg + cycleNudgeDeg * nudgeBlend;
+          const heightSpan = maxTopVhForStack - MIN_VH;
+          let labelOpacity = 1;
+          if (heightSpan > 1e-9) {
+            const t = (hv - MIN_VH) / heightSpan;
+            labelOpacity =
+              t <= 0 ? 0 : t < LABEL_FADE_ZONE_FRAC ? t / LABEL_FADE_ZONE_FRAC : 1;
+          } else {
+            labelOpacity = hv > MIN_VH + 1e-9 ? 1 : 0;
+          }
           const labelSpan =
             hv < 1e-6 || !line
               ? ''
-              : `<span class="hypotenuse-label" style="color: ${textColor}; --hypo-angle: ${angleDeg}deg" aria-hidden="true">${escapeHtml(line)}</span>`;
+              : `<span class="hypotenuse-label" style="color: ${textColor}; --hypo-angle: ${angleDeg}deg; opacity: ${labelOpacity}" aria-hidden="true">${escapeHtml(line)}</span>`;
           return `<div class="stack-layer" style="height:${hv}vh; background-color: ${backgroundColor}">${inner}${labelSpan}</div>`;
         })
         .join('');
